@@ -362,15 +362,11 @@ async function processNetflix(parsed) {
   const audioUrl = audioStream.urls[0].url;
   const videoUrl = videoStream.urls[0].url;
 
-  // const audioFilePath = join(__dirname, "tmp", `${audioId}_audio`);
-  // const videoFilePath = join(__dirname, "tmp", `${videoId}_video`);
   const audioFileName = `${audioId}_audio`;
   const videoFileName = `${videoId}_video`;
-  const decryptedVideoFilePath = join(
-    __dirname,
-    "tmp",
-    sanitize(manifest.outFileName)
-  );
+
+  const decryptedAudioFilePath = join(__dirname, "tmp", "audio.decrypted");
+  const decryptedVideoFilePath = join(__dirname, "tmp", "video.decrypted");
 
   const episodeSeason =
     type === "show"
@@ -428,11 +424,7 @@ async function processNetflix(parsed) {
   console.debug("Video file key is " + key);
   // now we can attempt to decrypt the video file :D
   const child = exec(
-    `mp4decrypt --key 2:${key} "${join(
-      __dirname,
-      "tmp",
-      videoFileName
-    )}" "${decryptedVideoFilePath}"`
+    `mp4decrypt --key 2:${key} "${videoFilePath}" "${decryptedVideoFilePath}"`
   );
   child.on("error", (err) => {
     console.error(err);
@@ -456,7 +448,7 @@ async function processNetflix(parsed) {
       "-i",
       decryptedVideoFilePath,
       "-i",
-      audioFilePath,
+      decryptedAudioFilePath,
       "-c:v",
       "copy",
       "-c:a",
