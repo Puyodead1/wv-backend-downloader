@@ -93,7 +93,7 @@ function printProgress(progress) {
 
 const downloadNew = (url, dir, file) => {
   return new Promise((resolve, reject) => {
-    const child = spawn("aria2c", [ "-d", dir, "-o", file, url]);
+    const child = spawn("aria2c", ["-d", dir, "-o", file, url]);
     child.stdout.on("data", (data) => {
       printProgress(data.toString());
     });
@@ -428,7 +428,11 @@ async function processNetflix(parsed) {
   console.debug("Video file key is " + key);
   // now we can attempt to decrypt the video file :D
   const child = exec(
-    `mp4decrypt --key 2:${key} ${videoFilePath} ${decryptedVideoFilePath}`
+    `mp4decrypt --key 2:${key} "${join(
+      __dirname,
+      "tmp",
+      videoFileName
+    )}" "${decryptedVideoFilePath}"`
   );
   child.on("error", (err) => {
     console.error(err);

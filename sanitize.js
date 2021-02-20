@@ -7,7 +7,7 @@ var windowsReservedRe = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
 
 function sanitize(input, replacement) {
   var sanitized = input
-    .replace(/\s+/g, "_")
+    .replace(/\s+/g, ".")
     .replace(illegalRe, replacement)
     .replace(controlRe, replacement)
     .replace(reservedRe, replacement)
