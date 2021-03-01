@@ -9,6 +9,7 @@ const fetch = require("node-fetch");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
+const notifier = require("node-notifier");
 
 const app = express();
 app.use(bodyParser.json({ limit: "100mb" }));
@@ -42,58 +43,64 @@ function printProgress(progress) {
   process.stdout.write(progress);
 }
 
-// function formatBytes(a, b = 2) {
-//   if (0 === a) return "0 Bytes";
-//   const c = 0 > b ? 0 : b,
-//     d = Math.floor(Math.log(a) / Math.log(1024));
-//   return (
-//     parseFloat((a / Math.pow(1024, d)).toFixed(c)) +
-//     " " +
-//     ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"][d]
-//   );
+// function indexOfMax(arr) {
+//   if (arr.length === 0) {
+//     return -1;
+//   }
+
+//   var max = arr[0];
+//   var maxIndex = 0;
+
+//   for (var i = 1; i < arr.length; i++) {
+//     if (arr[i] > max) {
+//       maxIndex = i;
+//       max = arr[i];
+//     }
+//   }
+
+//   return maxIndex;
 // }
 
-// var download = function (url, dest, cb) {
-//   var file = fs.createWriteStream(dest);
-//   progress(request(url))
-//     .on("progress", (state) => {
-//       // The state is an object that looks like this:
-//       // {
-//       //     percent: 0.5,               // Overall percent (between 0 to 1)
-//       //     speed: 554732,              // The download speed in bytes/sec
-//       //     size: {
-//       //         total: 90044871,        // The total payload size in bytes
-//       //         transferred: 27610959   // The transferred payload size in bytes
-//       //     },
-//       //     time: {
-//       //         elapsed: 36.235,        // The total elapsed seconds since the start (3 decimals)
-//       //         remaining: 81.403       // The remaining seconds to finish (3 decimals)
-//       //     }
-//       // }
-//       printProgress(
-//         `${
-//           Math.round(state.percent.toFixed(4)) * 100
-//         } % complete; ${formatBytes(state.speed, 3)}/sec; Size: ${formatBytes(
-//           state.size.transferred
-//         )}/${formatBytes(state.size.total)}; ${
-//           state.time.remaining
-//         } seconds remaining; ${state.time.elapsed} seconds elapsed`
-//       );
-//     })
-//     .on("error", (err) => console.error(err))
-//     .on("end", () => {
-//       process.stdout.write("\n");
-//     })
-//     .pipe(file);
+// function test(index, key, videoFileName) {
+//   const decPath = join(__dirname, "tmp", `${videoFileName}.dectest`);
+//   return new Promise((resolve, reject) => {
+//     const child = exec(
+//       `mp4decrypt --key ${index}:${key} "${join(
+//         __dirname,
+//         "tmp",
+//         videoFileName
+//       )}" "${decPath}"`
+//     );
+//     child.on("error", (err) => {
+//       console.error(err);
+//     });
+//     child.on("message", (msg, _) => {
+//       console.log(msg);
+//     });
+//     child.on("exit", (code) => {
+//       const end = Date.now();
+//       if (fs.existsSync(decPath)) {
+//         fs.unlinkSync(decPath);
+//       }
+//       if (code !== 0) {
+//         reject(code);
+//       }
 
-//   file.on("finish", () => {
-//     file.close(cb);
+//       resolve(end);
+//     });
 //   });
-// };
+// }
 
 const downloadNew = (url, dir, file) => {
   return new Promise((resolve, reject) => {
-    const child = spawn("aria2c", ["-d", dir, "-o", file, url]);
+    const child = spawn("aria2c", [
+      "--auto-file-renaming=false",
+      "-d",
+      dir,
+      "-o",
+      file,
+      url,
+    ]);
     child.stdout.on("data", (data) => {
       printProgress(data.toString());
     });
@@ -365,7 +372,9 @@ async function processNetflix(parsed) {
   const audioFileName = `${audioId}_audio`;
   const videoFileName = `${videoId}_video`;
 
-  const decryptedAudioFilePath = join(__dirname, "tmp", "audio.decrypted");
+  const audioFilePath = join(__dirname, "tmp", audioFileName);
+  const videoFilePath = join(__dirname, "tmp", videoFileName);
+
   const decryptedVideoFilePath = join(__dirname, "tmp", "video.decrypted");
 
   const episodeSeason =
@@ -374,12 +383,17 @@ async function processNetflix(parsed) {
           x.episodes.find((y) => y.id === metadata.video.currentEpisode)
         )
       : null;
+
   const seasonShortname =
     type === "show"
       ? episodeSeason.seq.toString().length === 1
         ? `S0${episodeSeason.seq}`
         : `S${episodeSeason.seq}`
       : null;
+
+  const episode = episodeSeason.episodes.find(
+    (x) => x.id === metadata.video.currentEpisode
+  );
 
   const finalOutputPath =
     type === "show"
@@ -406,6 +420,7 @@ async function processNetflix(parsed) {
     console.error(e)
   );
   console.log("Audio download complete");
+
   await downloadNew(videoUrl, "tmp", videoFileName).catch((e) =>
     console.error(e)
   );
@@ -422,6 +437,25 @@ async function processNetflix(parsed) {
   const key = kidMatch.key;
   if (!key) return console.error("Key was undefined!");
   console.debug("Video file key is " + key);
+
+  // we need to find the correct track to decrypt, sometimes its 1, other times its 2
+  // const results = [];
+  // for (var i = 0; i < 2; i++) {
+  //   var index = i + 1;
+  //   const start = Date.now();
+  //   const end = await test(index, key, videoFileName);
+  //   results[i] = end - start;
+  // }
+  // const trackIndex = indexOfMax(results);
+  // const trackID = trackIndex + 1;
+
+  // console.debug(
+  //   `We have determined that the correct track to decrypt is ${trackID}; the results of the test were: `,
+  //   results
+  // );
+
+  console.debug(JSON.stringify(decryptedContentKeys));
+
   // now we can attempt to decrypt the video file :D
   const child = exec(
     `mp4decrypt --key 2:${key} "${videoFilePath}" "${decryptedVideoFilePath}"`
@@ -441,14 +475,11 @@ async function processNetflix(parsed) {
     console.log(`Video decryption complete`);
     console.log("Merging audio and video...");
 
-    // const child2 = exec(
-    //   `ffmpeg -i "${decryptedVideoFilePath}" -i "${audioFilePath}" -c:v copy -c:a aac "${finalOutputPath}"`
-    // );
     const child2 = spawn("ffmpeg", [
       "-i",
       decryptedVideoFilePath,
       "-i",
-      decryptedAudioFilePath,
+      audioFilePath,
       "-c:v",
       "copy",
       "-c:a",
@@ -480,16 +511,14 @@ async function processNetflix(parsed) {
       fs.unlink(decryptedVideoFilePath, () =>
         console.log("decrypted video temp file deleted")
       );
+
+      notifier.notify({
+        title: "Download Complete",
+        message: `${metadata.video.title}: S${episodeSeason.seq} E${episode.seq} - ${episode.title}`,
+        sound: true,
+        wait: false,
+        time: 90000,
+      });
     });
   });
 }
-
-//wss.on("listening", () => console.log("Server listening!"));
-
-// downloadNew(
-//   "https://dash.pro42.lv3.cdn.hbomax.com/videos/PRO42/e2/gov2/hbo/feature/PROD817742/v2/video/23.98p/r0/vid10.mp4",
-//   "tmp",
-//   "vid10.mp4"
-// )
-//   .then(() => console.log("DOWNLOAD COMPLETE"))
-//   .catch((e) => console.error("DOWNLOAD ERROR", e));

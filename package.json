@@ -15,6 +15,7 @@
     "download-file-with-progressbar": "^1.2.3",
     "express": "^4.17.1",
     "node-fetch": "^2.6.1",
+    "node-notifier": "^9.0.0",
     "nodemon": "^2.0.7",
     "request": "^2.88.2",
     "request-progress": "^3.0.0",
