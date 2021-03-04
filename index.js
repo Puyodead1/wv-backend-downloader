@@ -96,9 +96,9 @@ const downloadNew = (url, dir, file) => {
     const child = spawn("aria2c", [
       "--auto-file-renaming=false",
       "-c",
-      "-j16",
-      "-x16",
-      "-s16",
+      "-j3",
+      "-x3",
+      "-s3",
       "-d",
       dir,
       "-o",
