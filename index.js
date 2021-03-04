@@ -95,6 +95,10 @@ const downloadNew = (url, dir, file) => {
   return new Promise((resolve, reject) => {
     const child = spawn("aria2c", [
       "--auto-file-renaming=false",
+      "-c",
+      "-j16",
+      "-x16",
+      "-s16",
       "-d",
       dir,
       "-o",
