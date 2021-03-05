@@ -10,6 +10,20 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const notifier = require("node-notifier");
+const { default: PQueue } = require("p-queue");
+const queue = new PQueue({ concurrency: 1 });
+
+queue.on("add", () => {
+  console.log(
+    `New task was added.  Size: ${queue.size}; Pending: ${queue.pending}`
+  );
+});
+
+queue.on("idle", () => {
+  console.log(
+    `The queue is idle. Size: ${queue.size}; Pending: ${queue.pending}`
+  );
+});
 
 const app = express();
 app.use(bodyParser.json({ limit: "100mb" }));
@@ -22,10 +36,16 @@ app.post("/rip", async (req, res) => {
 
   if (platform === "netflix") {
     res.sendStatus(200);
-    await processNetflix(req.body);
+    //    await processNetflix(req.body);
+    await queue.add(async () => {
+      await processNetflix(req.body);
+    });
   } else if (platform === "hulu") {
     res.sendStatus(200);
-    await processHulu(req.body);
+    // await processHulu(req.body);
+    await queue.add(async () => {
+      await processHulu(req.body);
+    });
   } else {
     return res.status(400).send("Invalid Platform");
   }
@@ -43,62 +63,14 @@ function printProgress(progress) {
   process.stdout.write(progress);
 }
 
-// function indexOfMax(arr) {
-//   if (arr.length === 0) {
-//     return -1;
-//   }
-
-//   var max = arr[0];
-//   var maxIndex = 0;
-
-//   for (var i = 1; i < arr.length; i++) {
-//     if (arr[i] > max) {
-//       maxIndex = i;
-//       max = arr[i];
-//     }
-//   }
-
-//   return maxIndex;
-// }
-
-// function test(index, key, videoFileName) {
-//   const decPath = join(__dirname, "tmp", `${videoFileName}.dectest`);
-//   return new Promise((resolve, reject) => {
-//     const child = exec(
-//       `mp4decrypt --key ${index}:${key} "${join(
-//         __dirname,
-//         "tmp",
-//         videoFileName
-//       )}" "${decPath}"`
-//     );
-//     child.on("error", (err) => {
-//       console.error(err);
-//     });
-//     child.on("message", (msg, _) => {
-//       console.log(msg);
-//     });
-//     child.on("exit", (code) => {
-//       const end = Date.now();
-//       if (fs.existsSync(decPath)) {
-//         fs.unlinkSync(decPath);
-//       }
-//       if (code !== 0) {
-//         reject(code);
-//       }
-
-//       resolve(end);
-//     });
-//   });
-// }
-
 const downloadNew = (url, dir, file) => {
   return new Promise((resolve, reject) => {
     const child = spawn("aria2c", [
       "--auto-file-renaming=false",
       "-c",
-      "-j3",
-      "-x3",
-      "-s3",
+      "-j16",
+      "-x16",
+      "-s16",
       "-d",
       dir,
       "-o",
@@ -370,8 +342,8 @@ async function processNetflix(parsed) {
   const audioId = audioStream.downloadable_id;
   const videoId = videoStream.downloadable_id;
 
-  const audioUrl = audioStream.urls[0].url;
-  const videoUrl = videoStream.urls[0].url;
+  const audioUrl = audioStream.urls[1].url;
+  const videoUrl = videoStream.urls[1].url;
 
   const audioFileName = `${audioId}_audio`;
   const videoFileName = `${videoId}_video`;
@@ -395,9 +367,12 @@ async function processNetflix(parsed) {
         : `S${episodeSeason.seq}`
       : null;
 
-  const episode = episodeSeason.episodes.find(
-    (x) => x.id === metadata.video.currentEpisode
-  );
+  const episode =
+    type === "show"
+      ? episodeSeason.episodes.find(
+          (x) => x.id === metadata.video.currentEpisode
+        )
+      : null;
 
   const finalOutputPath =
     type === "show"
@@ -516,9 +491,14 @@ async function processNetflix(parsed) {
         console.log("decrypted video temp file deleted")
       );
 
+      const notificationMsg =
+        type === "show"
+          ? `${metadata.video.title}: S${episodeSeason.seq} E${episode.seq} - ${episode.title}`
+          : metadata.video.title;
+
       notifier.notify({
         title: "Download Complete",
-        message: `${metadata.video.title}: S${episodeSeason.seq} E${episode.seq} - ${episode.title}`,
+        message: notificationMsg,
         sound: true,
         wait: false,
         time: 90000,
