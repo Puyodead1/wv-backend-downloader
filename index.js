@@ -459,10 +459,8 @@ async function processNetflix(parsed) {
       decryptedVideoFilePath,
       "-i",
       audioFilePath,
-      "-c:v",
-      "copy",
-      "-c:a",
-      "aac",
+      "-c",
+	  "copy",
       finalOutputPath,
     ]);
     console.log(child2.spawnargs.join(" "));
