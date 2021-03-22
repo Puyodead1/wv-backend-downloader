@@ -152,7 +152,11 @@ async function processHulu(parsed) {
           .items.find((x) => x.id === parsed.id)
       : null;
   const episodeShortname =
-    episode.number.length === 1 ? `E0${episode.number}` : `E${episode.number}`;
+    type === "series"
+      ? episode.number.length === 1
+        ? `E0${episode.number}`
+        : `E${episode.number}`
+      : null;
   const seasonShortname =
     type === "series"
       ? episode.season.length === 1
@@ -165,8 +169,8 @@ async function processHulu(parsed) {
     outFileName = sanitize(
       `${episode.series_name}.${seasonShortname}.${episodeShortname}-${episode.name}.WEB.%QUALITY%.mp4`
     );
-  } else if (metadata.video.type === "movie") {
-    outFileName = `${metadata.video.title}.mp4`;
+  } else if (metadata.browse.target_type === "movie") {
+    outFileName = `${metadata.details.entity.name}.mp4`;
   } else {
     console.warn("unknown video type: " + parsed.href_type);
     outFileName = `unknown.mp4`;
@@ -460,7 +464,7 @@ async function processNetflix(parsed) {
       "-i",
       audioFilePath,
       "-c",
-	  "copy",
+      "copy",
       finalOutputPath,
     ]);
     console.log(child2.spawnargs.join(" "));
