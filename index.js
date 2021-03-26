@@ -46,6 +46,11 @@ app.post("/rip", async (req, res) => {
     await queue.add(async () => {
       await processHulu(req.body);
     });
+  } else if (platform === "amazon") {
+    res.sendStatus(200);
+    await queue.add(async () => {
+      await processAmazon(req.body);
+    });
   } else {
     return res.status(400).send("Invalid Platform");
   }
@@ -110,6 +115,7 @@ function fetchMpd(url) {
   });
 }
 
+// TODO: make this function return a promise instead
 async function processHulu(parsed) {
   const metadata = parsed.metadata;
   const manifest = parsed.manifest;
@@ -140,9 +146,6 @@ async function processHulu(parsed) {
 
   const audioFileName = `${audioID}_audio`;
   const videoFileName = `${videoID}_video`;
-
-  const decryptedAudioFilePath = join(__dirname, "tmp", "audio.decrypted");
-  const decryptedVideoFilePath = join(__dirname, "tmp", "video.decrypted");
 
   ///
   const episode =
@@ -190,12 +193,24 @@ async function processHulu(parsed) {
     type === "series"
       ? join(__dirname, "output", title, seasonShortname)
       : join(__dirname, "output");
+  const tmpOutputFolderPath =
+    type === "series"
+      ? join(__dirname, "tmp", title, seasonShortname)
+      : join(__dirname, "tmp");
 
   if (type === "series" && !fs.existsSync(finalOutputFolderPath)) {
     fs.mkdirSync(finalOutputFolderPath, { recursive: true });
   }
 
+  if (type === "series" && !fs.existsSync(tmpOutputFolderPath)) {
+    fs.mkdirSync(tmpOutputFolderPath, { recursive: true });
+  }
+
+  const decryptedAudioFilePath = join(tmpOutputFolderPath, "audio.decrypted");
+  const decryptedVideoFilePath = join(tmpOutputFolderPath, "video.decrypted");
+
   console.debug(`Final output path: ${finalOutputPath}`);
+  console.debug(`Temp output folder path: ${tmpOutputFolderPath}`);
   ///
 
   const audioKID = adaptationset[0].ContentProtection[0].$["cenc:default_KID"];
@@ -223,15 +238,14 @@ async function processHulu(parsed) {
   if (!videoKey) return console.error("Video Key was undefined!");
   console.debug("video decryption key is " + videoKey);
 
-  await downloadNew(audioUrl, "tmp", audioFileName).catch((e) => {
+  await downloadNew(audioUrl, tmpOutputFolderPath, audioFileName).catch((e) => {
     console.error(e);
   });
   console.log("Audio download complete, starting decryption...");
 
   const child = exec(
     `mp4decrypt --key 1:${audioKey} "${join(
-      __dirname,
-      "tmp",
+      tmpOutputFolderPath,
       audioFileName
     )}" "${decryptedAudioFilePath}"`
   );
@@ -250,7 +264,7 @@ async function processHulu(parsed) {
     console.log(`Audio decryption complete`);
   });
 
-  await downloadNew(videoUrl, "tmp", videoFileName).catch((e) => {
+  await downloadNew(videoUrl, tmpOutputFolderPath, videoFileName).catch((e) => {
     console.error(e);
   });
 
@@ -258,8 +272,7 @@ async function processHulu(parsed) {
   // decrypt video file
   const child3 = exec(
     `mp4decrypt --key 1:${videoKey} "${join(
-      __dirname,
-      "tmp",
+      tmpOutputFolderPath,
       videoFileName
     )}" "${decryptedVideoFilePath}"`
   );
@@ -327,6 +340,7 @@ async function processHulu(parsed) {
   });
 }
 
+// TODO: make this function return a promise instead
 async function processNetflix(parsed) {
   const metadata = parsed.metadata;
   const manifest = parsed.manifest;
@@ -347,11 +361,6 @@ async function processNetflix(parsed) {
 
   const audioFileName = `${audioId}_audio`;
   const videoFileName = `${videoId}_video`;
-
-  const audioFilePath = join(__dirname, "tmp", audioFileName);
-  const videoFilePath = join(__dirname, "tmp", videoFileName);
-
-  const decryptedVideoFilePath = join(__dirname, "tmp", "video.decrypted");
 
   const episodeSeason =
     type === "show"
@@ -389,18 +398,38 @@ async function processNetflix(parsed) {
       ? join(__dirname, "output", title, seasonShortname)
       : join(__dirname, "output");
 
+  const tmpOutputFolderPath =
+    type === "show"
+      ? join(__dirname, "tmp", title, seasonShortname, sanitize(episode.title))
+      : join(__dirname, "tmp");
+
+  const audioFilePath = join(tmpOutputFolderPath, audioFileName);
+  const videoFilePath = join(tmpOutputFolderPath, videoFileName);
+
+  const decryptedVideoFilePath = join(tmpOutputFolderPath, "video.decrypted");
+
   if (type === "show" && !fs.existsSync(finalOutputFolderPath)) {
     fs.mkdirSync(finalOutputFolderPath, { recursive: true });
   }
 
-  console.debug(`Final output path: ${finalOutputPath}`);
+  if (type === "show" && !fs.existsSync(tmpOutputFolderPath)) {
+    fs.mkdirSync(tmpOutputFolderPath, { recursive: true });
+  }
 
-  await downloadNew(audioUrl, "tmp", audioFileName).catch((e) =>
+  const fileData = `Output path: ${finalOutputPath}\nKeys: ${JSON.stringify(
+    decryptedContentKeys
+  )}`;
+  fs.writeFileSync(join(tmpOutputFolderPath, "data.txt"), fileData);
+
+  console.debug(`Final output path: ${finalOutputPath}`);
+  console.debug(`Temp output folder path: ${tmpOutputFolderPath}`);
+
+  await downloadNew(audioUrl, tmpOutputFolderPath, audioFileName).catch((e) =>
     console.error(e)
   );
   console.log("Audio download complete");
 
-  await downloadNew(videoUrl, "tmp", videoFileName).catch((e) =>
+  await downloadNew(videoUrl, tmpOutputFolderPath, videoFileName).catch((e) =>
     console.error(e)
   );
   console.log("Video download complete");
@@ -460,7 +489,7 @@ async function processNetflix(parsed) {
       "-i",
       audioFilePath,
       "-c",
-	  "copy",
+      "copy",
       finalOutputPath,
     ]);
     console.log(child2.spawnargs.join(" "));
@@ -479,15 +508,15 @@ async function processNetflix(parsed) {
       }
 
       console.log(`${manifest.outFileName} has been successfully downloaded!`);
-      fs.unlink(join(__dirname, "tmp", audioFileName), () =>
-        console.log("Audio temp file deleted")
-      );
-      fs.unlink(join(__dirname, "tmp", videoFileName), () =>
-        console.log("Video temp file deleted")
-      );
-      fs.unlink(decryptedVideoFilePath, () =>
-        console.log("decrypted video temp file deleted")
-      );
+      // fs.unlink(join(__dirname, "tmp", audioFileName), () =>
+      //   console.log("Audio temp file deleted")
+      // );
+      // fs.unlink(join(__dirname, "tmp", videoFileName), () =>
+      //   console.log("Video temp file deleted")
+      // );
+      // fs.unlink(decryptedVideoFilePath, () =>
+      //   console.log("decrypted video temp file deleted")
+      // );
 
       const notificationMsg =
         type === "show"
@@ -503,4 +532,62 @@ async function processNetflix(parsed) {
       });
     });
   });
+}
+
+// TODO: make this function return a promise instead
+async function processAmazon(parsed) {
+  const keys = parsed.keys;
+  const asin = parsed.asin;
+
+  const dataUrl = `https://atv-ps.amazon.com/cdp/catalog/GetPlaybackResources?deviceID=232fd6a8bec4c540fb035cdf83b90af96b3a899c899b6654932f8f7d&deviceTypeID=AOAGZA014O5RE&gascEnabled=false&marketplaceID=ATVPDKIKX0DER&uxLocale=en_US&firmware=1&clientId=f22dbddb-ef2c-48c5-8876-bed0d47594fd&deviceApplicationName=Chrome&playerType=xp&operatingSystemName=Windows&operatingSystemVersion=10.0&asin=${asin}&consumptionType=Streaming&desiredResources=PlaybackUrls,CatalogMetadata,SubtitleUrls,ForcedNarratives&resourceUsage=CacheResources&videoMaterialType=Feature&userWatchSessionId=7fa43766-c4aa-441a-ac9c-fe9f125f3266&deviceProtocolOverride=Https&deviceStreamingTechnologyOverride=DASH&deviceDrmOverride=CENC&deviceBitrateAdaptationsOverride=CVBR,CBR&deviceHdrFormatsOverride=None&deviceVideoCodecOverride=H264&deviceVideoQualityOverride=HD&audioTrackId=all&languageFeature=MLFv2&liveManifestType=patternTemplate,accumulating,live&supportedDRMKeyScheme=DUAL_KEY&titleDecorationScheme=primary-content&subtitleFormat=TTMLv2&playbackSettingsFormatVersion=1.0.0&playerAttributes={"middlewareName":"Chrome","middlewareVersion":"86.0.4240.75","nativeApplicationName":"Chrome","nativeApplicationVersion":"86.0.4240.75","supportedAudioCodecs":"AAC","frameRate":"HFR","H264.codecLevel":"4.2","H265.codecLevel":"0.0"}`;
+  console.log(dataUrl);
+  try {
+    const data = await fetch(dataUrl, {
+      headers: {
+        cookie:
+          'session-id=141-9351593-3439861; ubid-main=133-0720260-1437213; x-main="ZPTqXEUrEesWUS2y7z?v?j9@XdfETsmST6Z8nY1aBr@nva5xAki6JYmgR?PyNHnC"; at-main=Atza|IwEBIGs-CpHo5suFdryTzdpkpDT58G2RyKODkTSum2akclsAtZE222GMYDWwrBjGpLvd2_Gfh_KJtvVtUNAhFsKC5oTVKlZypjLmmPdx3QVXbRuaaZqVB-7K5q6lFzEtHKNhB_Ju9cLoShKDzsMTnYK3tfNYcgx9WU2fag9aV2BEIb1d47gJVqRxSLCUHBQyg4uujG1wyZb2klhTSumj8G5NWmpgBGf6THOfFfToddP4Eolw2w; sess-at-main="eER7OrhaaObSnZo2PljZXmgsiFl3DxnqrZlz34dZ2dk="; sst-main=Sst1|PQErjbnZeO5VY_568Efi38RdCTeB9sVHWS3-TrN_RtjhgpvjOV58hj9sVn9xYTmSxqt-4-SRn54f4fCim2OKdx8Qu4iF_bQFGL8PKRixLQokMUpBQZ5iW4D8PeTZO_536Ql4Rhs7TlX7dlGLUFqLf6qdSz0u03iuSP63llZJvYWWySJEISaUw__ArUr_rWwq9oyVE_cWqcSAQsMjRg3LtJlC-RTDsl_dxOrtGzwjkRalpoBIOz4Dwtj76tJg7e-cfTbw_llopJ5uZvj-1r62qY6GR4kJl2r2lGOfKja6Lge1pyc; lc-main=en_US; i18n-prefs=USD; session-token="wog3OjXPIOG5asvhzsNYJAwUBW4Pis9mLWSIWdjdt/0UgPTQ0Is9rnkd53g0De3DpSnXWHYzQcs6mZxVm0plimDwaU6z/1wZgP0SsadOvauE+nA+gmImWPlrgSbbphDeM6ZTcbCldZRabEZjfZrfO5i+Ob+6u6NmSYgRMkyA8mlgVU/qTyzP17z6IDGY4q2h+PvmnxD+pnYkzC0wWDN3ng=="; scrly_token=NzAxMTFiYzU6emljcmlsMDcyMWFAbWlzY2hvb2xzLm9yZzpzZWN1cmx5QGpjaXNkLm9yZzpqY2lzZG9yZ0hvc3RlZFJlZ2lvbjJEVklTdHVVbnJlc3RyaWN0ZWREVklTdHVIUzEyOi06b3U6Mzg6MDo6; scrly_log_1=1; session-id-time=2082758401l',
+      },
+    }).then((r) => r.json());
+    console.log(data);
+    if (data.error) {
+      console.error(`${data.error.errorCode}: ${data.error.message}`);
+    } else {
+      const catalog = data.catalogMetadata.catalog;
+      const tvAncestors = data.catalogMetadata.family.tvAncestors;
+
+      if (catalog.entityType === "TV Show") {
+        const show = tvAncestors.find((x) => x.catalog.type === "SHOW");
+        const season = tvAncestors.find((x) => x.catalog.type === "SEASON");
+
+        const episodeNumber = catalog.episodeNumber;
+        const episodeTitle = catalog.title;
+        const seasonNumber = season.catalog.seasonNumber;
+        const seriesTitle = show.catalog.title;
+
+        const urlSet =
+          data.playbackUrls.urlSets[data.playbackUrls.defaultUrlSetId];
+        const manifestUrl = urlSet.urls.manifest.url;
+        const subtitleUrl = data.subtitleUrls.find(
+          (x) => x.languageCode === "en-us"
+        ).url;
+
+        const resolution = data.returnedTitleRendition.videoResolution; // ex: 720p
+
+        console.debug(
+          `${seriesTitle} - Season ${seasonNumber}, Episode ${episodeNumber}: ${episodeTitle}`
+        );
+        console.debug(manifestUrl);
+        console.debug(subtitleUrl);
+        console.debug(resolution);
+
+        // TODO: download
+      } else {
+        console.error(
+          `Unsupported entity type: ${data.catalogMetadata.catalog.entityType}!`
+        );
+      }
+    }
+  } catch (e) {
+    console.error(e);
+  }
 }
