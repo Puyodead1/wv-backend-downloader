@@ -11,6 +11,7 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 const notifier = require("node-notifier");
 const { default: PQueue } = require("p-queue");
+const { sortFormats, sortAdaptationSets, getBaseURL } = require("./utils");
 const queue = new PQueue({ concurrency: 1 });
 
 queue.on("add", () => {
@@ -170,7 +171,7 @@ async function processHulu(parsed) {
   var outFileName;
   if (parsed.href_type === "series") {
     outFileName = sanitize(
-      `${episode.series_name}.${seasonShortname}.${episodeShortname}-${episode.name}.WEB.%QUALITY%.mp4`
+      `${episode.series_name}.${seasonShortname}.${episodeShortname}.${episode.name}.WEB.%QUALITY%.mp4`
     );
   } else if (metadata.browse.target_type === "movie") {
     outFileName = `${metadata.details.entity.name}.mp4`;
@@ -567,28 +568,250 @@ async function processAmazon(parsed) {
         const episodeTitle = catalog.title;
         const seasonNumber = season.catalog.seasonNumber;
         const seriesTitle = show.catalog.title;
+        const seriesTitleSafe = sanitize(show.catalog.title);
 
         const urlSet =
           data.playbackUrls.urlSets[data.playbackUrls.defaultUrlSetId];
         const manifestUrl = urlSet.urls.manifest.url;
-        const subtitleUrl = data.subtitleUrls.find(
+        const subtitles = data.subtitleUrls.find(
           (x) => x.languageCode === "en-us"
-        ).url;
+        );
+        const subtitleUrl = subtitles.url;
 
         const resolution = data.returnedTitleRendition.videoResolution; // ex: 720p
 
         console.debug(
           `${seriesTitle} - Season ${seasonNumber}, Episode ${episodeNumber}: ${episodeTitle}`
         );
-        console.debug(manifestUrl);
-        console.debug(subtitleUrl);
-        console.debug(resolution);
 
-        // TODO: download
-      } else {
-        console.error(
-          `Unsupported entity type: ${data.catalogMetadata.catalog.entityType}!`
+        const mpdXml = await fetchMpd(manifestUrl);
+        const mpdJson = await parseXML(mpdXml);
+
+        const baseUrl = getBaseURL(manifestUrl);
+
+        // sorts all video representations and finds the best one
+        const bestVideoRepresentation = mpdJson.MPD.Period[0].AdaptationSet[0].Representation.sort(
+          sortFormats
+        ).shift();
+
+        // all audio adaptation sets in english
+        const audioAdaptationSets = mpdJson.MPD.Period[0].AdaptationSet.filter(
+          (x) =>
+            x.$.contentType &&
+            x.$.contentType === "audio" &&
+            x.$.lang &&
+            x.$.lang === "en"
         );
+
+        // sorts all audio adaptation sets and returns the best one
+        const bestAudioAdaptationSet = audioAdaptationSets
+          .sort(sortAdaptationSets)
+          .shift();
+
+        var bestAudioRepresentation;
+        if (bestAudioAdaptationSet.Representation.length === 1) {
+          bestAudioRepresentation = bestAudioAdaptationSet.Representation[0];
+        } else {
+          console.error(
+            "more than one representation in adaptation set! FIX THIS"
+          );
+          process.exit(1);
+        }
+
+        const videoUrl = baseUrl + "/" + bestVideoRepresentation.BaseURL[0];
+        const audioUrl = baseUrl + "/" + bestAudioRepresentation.BaseURL[0];
+
+        const audioFileName = `${asin}_audio`;
+        const videoFileName = `${asin}_video`;
+
+        const episodeShortname =
+          episodeNumber.toString().length === 1
+            ? `E0${episodeNumber}`
+            : `E${episodeNumber}`;
+
+        const seasonShortname =
+          seasonNumber.toString().length === 1
+            ? `S0${seasonNumber}`
+            : `S${seasonNumber}`;
+        const outfileName = sanitize(
+          `${seriesTitleSafe}.${seasonShortname}.${episodeShortname}.${episodeTitle}.WEB.${bestVideoRepresentation.$.height}.mp4`
+        );
+        const finalOutputPath = join(
+          __dirname,
+          "output",
+          seriesTitleSafe,
+          seasonShortname,
+          outfileName
+        );
+        const finalOutputFolderPath = join(
+          __dirname,
+          "output",
+          seriesTitleSafe,
+          seasonShortname
+        );
+        const tmpOutputFolderPath = join(
+          __dirname,
+          "tmp",
+          seriesTitleSafe,
+          seasonShortname
+        );
+
+        if (!fs.existsSync(finalOutputFolderPath)) {
+          fs.mkdirSync(finalOutputFolderPath, { recursive: true });
+        }
+
+        if (!fs.existsSync(tmpOutputFolderPath)) {
+          fs.mkdirSync(tmpOutputFolderPath, { recursive: true });
+        }
+
+        const decryptedAudioFilePath = join(
+          tmpOutputFolderPath,
+          `${asin}_audio.decrypted`
+        );
+        const decryptedVideoFilePath = join(
+          tmpOutputFolderPath,
+          `${asin}_video.decrypted`
+        );
+        console.debug(`Final output path: ${finalOutputPath}`);
+        console.debug(`Temp output folder path: ${tmpOutputFolderPath}`);
+        ///
+
+        const videoKID = mpdJson.MPD.Period[0].AdaptationSet[0].ContentProtection[0].$[
+          "cenc:default_KID"
+        ].replace(/-/g, "");
+        const audioKID = bestAudioAdaptationSet.ContentProtection[0].$[
+          "cenc:default_KID"
+        ].replace(/-/g, "");
+
+        console.debug("KID of audio file is " + audioKID);
+        const audioKeyObj = keys.find((x) => x.kid.toUpperCase() === audioKID);
+        if (!audioKeyObj)
+          return console.error(
+            "No KID Match. Manual intervention may be needed!\n" + keys
+          );
+        console.debug("Audio KID Match is " + JSON.stringify(audioKeyObj));
+        const audioKey = audioKeyObj.key;
+        if (!audioKey) return console.error("audio Key was undefined!");
+        console.debug("audio decryption key is " + audioKey);
+
+        console.debug("KID of video file is " + videoKID);
+        const videoKeyObj = keys.find((x) => x.kid.toUpperCase() === videoKID);
+        if (!videoKeyObj)
+          return console.error(
+            "No KID Match. Manual intervention may be needed!\n" + keys
+          );
+        console.debug("Video KID Match is " + JSON.stringify(videoKeyObj));
+        const videoKey = videoKeyObj.key;
+        if (!videoKey) return console.error("Video Key was undefined!");
+        console.debug("video decryption key is " + videoKey);
+
+        await downloadNew(
+          audioUrl,
+          tmpOutputFolderPath,
+          audioFileName
+        ).catch((e) => console.error(e));
+        console.log("Audio download complete, starting decryption...");
+
+        const child = exec(
+          `mp4decrypt --key 1:${audioKey} "${join(
+            tmpOutputFolderPath,
+            audioFileName
+          )}" "${decryptedAudioFilePath}"`
+        );
+        child.on("error", (err) => {
+          console.error(err);
+        });
+        child.on("message", (msg, _) => {
+          console.log(msg);
+        });
+        child.on("exit", (code) => {
+          if (code !== 0) {
+            console.error(`mp4decrypt exited with code ${code}`);
+            process.exit(code);
+          }
+
+          console.log(`Audio decryption complete`);
+        });
+
+        await downloadNew(
+          videoUrl,
+          tmpOutputFolderPath,
+          videoFileName
+        ).catch((e) => console.error(e));
+        console.log("Video download complete, starting decryption...");
+
+        // download subtitles
+        // await downloadNew(
+        //   subtitleUrl,
+        //   tmpOutputFolderPath,
+        //   videoFileName.replace(".mp4", `.${subtitleUrl.split(".").pop()}`)
+        // ).catch((e) => console.error(e));
+        // console.log("Subtitle download complete, starting video decryption...");
+
+        const child3 = exec(
+          `mp4decrypt --key 1:${videoKey} "${join(
+            tmpOutputFolderPath,
+            videoFileName
+          )}" "${decryptedVideoFilePath}"`
+        );
+        child3.on("error", (err) => {
+          console.error(err);
+        });
+        child3.on("message", (msg, _) => {
+          console.log(msg);
+        });
+
+        child3.on("exit", (code) => {
+          if (code !== 0) {
+            console.error(`mp4decrypt exited with code ${code}`);
+            process.exit(code);
+          }
+
+          console.log(`Video decryption complete`);
+          console.log("Merging audio and video...");
+
+          // const child2 = exec(
+          //   `ffmpeg -i "${decryptedVideoFilePath}" -i "${audioFilePath}" -c:v copy -c:a aac "${finalOutputPath}"`
+          // );
+          const child2 = spawn("ffmpeg", [
+            "-i",
+            decryptedVideoFilePath,
+            "-i",
+            decryptedAudioFilePath,
+            "-c",
+            "copy",
+            finalOutputPath,
+          ]);
+          console.log(child2.spawnargs.join(" "));
+          child2.stdout.on("data", (data) => {
+            console.log(data.toString());
+          });
+          child2.stderr.on("data", (data) => {
+            console.error(data.toString());
+          });
+          child2.on("error", (err) => console.error(err));
+          child2.on("message", (msg, _) => console.log(msg));
+          child2.on("exit", (code) => {
+            if (code !== 0) {
+              console.error(`ffmpeg exited with code ${code}`);
+              process.exit(code);
+            }
+
+            console.log(`${outfileName} has been successfully downloaded!`);
+            fs.unlink(join(__dirname, "tmp", audioFileName), () =>
+              console.log("Audio temp file deleted")
+            );
+            fs.unlink(join(__dirname, "tmp", videoFileName), () =>
+              console.log("Video temp file deleted")
+            );
+            fs.unlink(decryptedAudioFilePath, () =>
+              console.log("decrypted audio temp file deleted")
+            );
+            fs.unlink(decryptedVideoFilePath, () =>
+              console.log("decrypted video temp file deleted")
+            );
+          });
+        });
       }
     }
   } catch (e) {
