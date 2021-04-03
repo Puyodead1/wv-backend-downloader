@@ -211,8 +211,14 @@ async function processHulu(parsed) {
     fs.mkdirSync(tmpOutputFolderPath, { recursive: true });
   }
 
-  const decryptedAudioFilePath = join(tmpOutputFolderPath, "audio.decrypted");
-  const decryptedVideoFilePath = join(tmpOutputFolderPath, "video.decrypted");
+  const decryptedAudioFilePath = join(
+    tmpOutputFolderPath,
+    `${audioID}_audio.decrypted`
+  );
+  const decryptedVideoFilePath = join(
+    tmpOutputFolderPath,
+    `${videoID}_video.decrypted`
+  );
 
   console.debug(`Final output path: ${finalOutputPath}`);
   console.debug(`Temp output folder path: ${tmpOutputFolderPath}`);
@@ -329,10 +335,10 @@ async function processHulu(parsed) {
           `${video.$.height}p`
         )} has been successfully downloaded!`
       );
-      fs.unlink(join(__dirname, "tmp", audioFileName), () =>
+      fs.unlink(join(__dirname, tmpOutputFolderPath, audioFileName), () =>
         console.log("Audio temp file deleted")
       );
-      fs.unlink(join(__dirname, "tmp", videoFileName), () =>
+      fs.unlink(join(__dirname, tmpOutputFolderPath, videoFileName), () =>
         console.log("Video temp file deleted")
       );
       fs.unlink(decryptedAudioFilePath, () =>
