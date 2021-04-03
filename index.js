@@ -335,10 +335,10 @@ async function processHulu(parsed) {
           `${video.$.height}p`
         )} has been successfully downloaded!`
       );
-      fs.unlink(join(__dirname, tmpOutputFolderPath, audioFileName), () =>
+      fs.unlink(join(tmpOutputFolderPath, audioFileName), () =>
         console.log("Audio temp file deleted")
       );
-      fs.unlink(join(__dirname, tmpOutputFolderPath, videoFileName), () =>
+      fs.unlink(join(tmpOutputFolderPath, videoFileName), () =>
         console.log("Video temp file deleted")
       );
       fs.unlink(decryptedAudioFilePath, () =>
