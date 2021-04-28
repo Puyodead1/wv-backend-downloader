@@ -11,7 +11,13 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 const notifier = require("node-notifier");
 const { default: PQueue } = require("p-queue");
-const { sortFormats, sortAdaptationSets, getBaseURL } = require("./utils");
+const {
+  sortFormats,
+  sortAdaptationSets,
+  getBaseURL,
+  sortAudioRepresentationsSets,
+} = require("./utils");
+const { inspect } = require("util");
 const queue = new PQueue({ concurrency: 1 });
 
 queue.on("add", () => {
@@ -595,13 +601,19 @@ async function processAmazon(parsed) {
 
         const baseUrl = getBaseURL(manifestUrl);
 
+        // some such as free videos have ads which are contained in multiple segments
+        // we need to find the first period that contains encrypted media
+        const period = mpdJson.MPD.Period.find(
+          (x) => x.AdaptationSet[0].ContentProtection
+        );
+
         // sorts all video representations and finds the best one
-        const bestVideoRepresentation = mpdJson.MPD.Period[0].AdaptationSet[0].Representation.sort(
+        const bestVideoRepresentation = period.AdaptationSet[0].Representation.sort(
           sortFormats
         ).shift();
 
         // all audio adaptation sets in english
-        const audioAdaptationSets = mpdJson.MPD.Period[0].AdaptationSet.filter(
+        const audioAdaptationSets = period.AdaptationSet.filter(
           (x) =>
             x.$.contentType &&
             x.$.contentType === "audio" &&
@@ -614,15 +626,28 @@ async function processAmazon(parsed) {
           .sort(sortAdaptationSets)
           .shift();
 
-        var bestAudioRepresentation;
-        if (bestAudioAdaptationSet.Representation.length === 1) {
-          bestAudioRepresentation = bestAudioAdaptationSet.Representation[0];
-        } else {
-          console.error(
-            "more than one representation in adaptation set! FIX THIS"
-          );
+        // var bestAudioRepresentation;
+        // if (bestAudioAdaptationSet.Representation.length === 1) {
+        //   bestAudioRepresentation = bestAudioAdaptationSet.Representation[0];
+        // } else {
+        //   console.debug(
+        //     inspect(bestAudioAdaptationSet.Representation, false, 20, true)
+        //   );
+        //   console.error(
+        //     "more than one representation in adaptation set! FIX THIS"
+        //   );
+        //   process.exit(1);
+        // }
+        const bestAudioRepresentation = bestAudioAdaptationSet.Representation.sort(
+          sortAudioRepresentationsSets
+        ).shift();
+
+        if (!bestAudioRepresentation) {
+          console.error("No audio representations found!");
           process.exit(1);
         }
+
+        console.debug(bestAudioRepresentation);
 
         const videoUrl = baseUrl + "/" + bestVideoRepresentation.BaseURL[0];
         const audioUrl = baseUrl + "/" + bestAudioRepresentation.BaseURL[0];
@@ -682,7 +707,7 @@ async function processAmazon(parsed) {
         console.debug(`Temp output folder path: ${tmpOutputFolderPath}`);
         ///
 
-        const videoKID = mpdJson.MPD.Period[0].AdaptationSet[0].ContentProtection[0].$[
+        const videoKID = period.AdaptationSet[0].ContentProtection[0].$[
           "cenc:default_KID"
         ].replace(/-/g, "");
         const audioKID = bestAudioAdaptationSet.ContentProtection[0].$[

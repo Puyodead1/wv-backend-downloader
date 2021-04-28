@@ -15,7 +15,8 @@ const getVideoEncodingRank = (format) =>
   videoEncodingRanks.findIndex(
     (enc) => format.$.codecs && format.$.codecs.includes(enc)
   );
-const getAudioBandwidth = (format) => format.$.maxBandwidth || 0;
+const getAudioMaxBandwidth = (format) => format.$.maxBandwidth || 0;
+const getAudioBandwidth = (rep) => rep.$.bandwidth || 0;
 const getAudioEncodingRank = (format) =>
   audioEncodingRanks.findIndex(
     (enc) =>
@@ -66,6 +67,16 @@ exports.sortFormats = (a, b) =>
  * @returns {number}
  */
 exports.sortAdaptationSets = (a, b) =>
+  sortFormatsBy(a, b, [getAudioMaxBandwidth, getAudioEncodingRank]);
+
+/**
+ * Sort audio representations from highest bandwidth to lowest.
+ *
+ * @param {Object} a
+ * @param {Object} b
+ * @returns {number}
+ */
+exports.sortAudioRepresentationsSets = (a, b) =>
   sortFormatsBy(a, b, [getAudioBandwidth, getAudioEncodingRank]);
 
 exports.getBaseURL = (url) => {
