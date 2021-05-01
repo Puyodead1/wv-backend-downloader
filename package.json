@@ -1,0 +1,36 @@
+{
+  "name": "downloader-api-v2",
+  "version": "2.0.0",
+  "description": "",
+  "main": "build/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "npm run build && npm run start",
+    "start": "node build"
+  },
+  "keywords": [],
+  "author": "Puyodead1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Puyodead1/wv-backend-downloader"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@types/express": "^4.17.11",
+    "atob": "^2.1.2",
+    "body-parser": "^1.19.0",
+    "btoa": "^1.2.1",
+    "centra": "^2.4.2",
+    "cookie-parser": "^1.4.5",
+    "cors": "^2.8.5",
+    "express": "^4.17.1",
+    "express-validator": "^6.10.0",
+    "express-winston": "^4.1.0",
+    "mt-files-downloader": "^0.2.5",
+    "node-fetch": "^2.6.1",
+    "pbf": "^3.2.1",
+    "queue": "^6.0.2",
+    "winston": "^3.3.3",
+    "ytdl-core": "^4.5.0"
+  }
+}
