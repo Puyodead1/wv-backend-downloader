@@ -1,14 +1,16 @@
 import DownloaderAPI from "./DownloaderAPI";
 import Path from "path";
 
-const downloaderapi = new DownloaderAPI(Path.join(__dirname, "modules"));
 (async () => {
-  /**
-   * Load all the site modules
-   */
-  downloaderapi.logger.info("[Modules] Loading modules...");
-  await downloaderapi.loadModules();
-  downloaderapi.logger.info(
-    `[Modules] Loaded ${downloaderapi.modules.size} module(s).`
+  const api = new DownloaderAPI(Path.join(__dirname, "modules"));
+
+  // Load modules
+  api.logger.info("[Module Loader] Loading modules...");
+  const failedModuleCount = await api.loadModules();
+  api.logger.info(
+    `[Module Loader] Loaded ${api.modules.size} modules, ${failedModuleCount} module(s) failed to load.`
   );
+
+  // Start the server
+  api.server.initalize();
 })();

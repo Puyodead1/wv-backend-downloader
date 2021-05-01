@@ -5,11 +5,11 @@ export const TEST_URLS = {
   NO_DRM: "https://www.youtube.com/watch?v=hT_nvWreIhg",
 };
 
-export default class Youtube extends BaseModule {
+export default class YouTube extends BaseModule {
   public requestOptions: object;
 
   constructor() {
-    super("youtube", "Youtube");
+    super("youtube", "YouTube");
     this.requestOptions = {
       headers: {
         cookie:

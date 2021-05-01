@@ -4,12 +4,12 @@ import { body, validationResult } from "express-validator";
 import DownloaderAPI from "./DownloaderAPI";
 
 export default class Server {
-  public downloader: DownloaderAPI;
+  public api: DownloaderAPI;
   public port: number;
   public app: express.Application;
 
-  constructor(downloader: DownloaderAPI, port: number) {
-    this.downloader = downloader;
+  constructor(api: DownloaderAPI, port: number) {
+    this.api = api;
     this.port = port;
     this.app = express();
   }
@@ -21,7 +21,7 @@ export default class Server {
     // create logger for express http requests
     this.app.use(
       expressWinston.logger({
-        winstonInstance: this.downloader.logger,
+        winstonInstance: this.api.logger,
         meta: false,
         expressFormat: true,
         colorize: true,
@@ -38,17 +38,15 @@ export default class Server {
         if (!errors.isEmpty()) {
           // FIXME: maybe we should remove the errors from the response in a production env?
           // return res.status(400).json({ errors: errors.array() });
-          return res.status(400).json({ error: "malformed request body" });
+          return res.status(400).json({ error: "Malformed Request Body" });
         }
 
         // destructure some variables
         const { platform } = req.body;
 
         // check if the platform is supported
-        if (!this.downloader.modules.has(platform.toLowerCase())) {
-          return res
-            .status(400)
-            .json({ error: "platform is invalid or unsupported" });
+        if (!this.api.modules.has(platform.toLowerCase())) {
+          return res.status(400).json({ error: "Invalid Platform" });
         }
 
         // FIXME:
@@ -60,15 +58,13 @@ export default class Server {
     // create logger for express errors
     this.app.use(
       expressWinston.errorLogger({
-        winstonInstance: this.downloader.logger,
+        winstonInstance: this.api.logger,
       })
     );
 
     // start the server
     this.app.listen(this.port, () => {
-      this.downloader.logger.info(
-        `[Server] Server listening on port ${this.port}`
-      );
+      this.api.logger.info(`[Server] Listening on port ${this.port}`);
     });
   }
 }

@@ -1,6 +1,6 @@
 import { Logger } from "winston";
 import { spawn } from "child_process";
-import DownloadError from "./lib/DownloadError";
+import DownloadError from "./errors/DownloadError";
 import MTDownloader from "mt-files-downloader";
 
 export default class Utils {
@@ -24,6 +24,7 @@ export default class Utils {
 
   /**
    * Downloads a file using aria2c
+   * @deprecated use Utils#download
    * @param url url of the file to download
    * @param dir directory to download file to
    * @param file name to save the file as

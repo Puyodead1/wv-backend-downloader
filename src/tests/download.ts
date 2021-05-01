@@ -5,7 +5,7 @@ import path from "path";
 const utils = new Utils(logger);
 
 utils
-  .downloadMT(
+  .download(
     "http://speedtest.tele2.net/100MB.zip",
     path.join(__dirname, "..", "..", "test.zip")
   )
