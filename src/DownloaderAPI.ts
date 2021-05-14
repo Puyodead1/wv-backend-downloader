@@ -5,8 +5,14 @@ import Utils from "./utils";
 import Queue from "queue";
 import { Logger } from "winston";
 import BaseModule from "./modules/BaseModule";
+import { join } from "path";
+interface DownloaderAPIOptions {
+  server: { port: number };
+  downloads: { output: string; temp: string };
+}
 
 export default class DownloaderAPI {
+  public options: DownloaderAPIOptions;
   public logger: Logger;
   public moduleDirPath: string;
   public modules: Map<String, BaseModule>;
@@ -16,15 +22,28 @@ export default class DownloaderAPI {
 
   constructor(
     moduleDirPath: string,
-    opts: { server: { port: number } } = { server: { port: 5000 } }
+    options: DownloaderAPIOptions = {
+      server: { port: 5000 },
+      downloads: {
+        output: join(
+          "C:\\Users\\23562\\Documents\\Code\\wv ripping projects\\downloader-api-v2",
+          "out"
+        ),
+        temp: join(
+          "C:\\Users\\23562\\Documents\\Code\\wv ripping projects\\downloader-api-v2",
+          "temp"
+        ),
+      },
+    }
   ) {
     //
+    this.options = options;
     this.logger = logger;
     this.moduleDirPath = moduleDirPath;
     this.modules = new Map();
     this.utils = new Utils(logger);
     this.queue = new Queue({ autostart: true, concurrency: 1 });
-    this.server = new Server(this, opts.server.port);
+    this.server = new Server(this, this.options.server.port);
   }
 
   /**
@@ -42,7 +61,7 @@ export default class DownloaderAPI {
       for (const file of moduleFiles) {
         try {
           const m = require(`./modules/${file}`).default;
-          const module = new m();
+          const module = new m(this);
           this.modules.set(module.id, module);
           this.logger.verbose(
             `[Module Loader] Loaded module '${module.name}'.`

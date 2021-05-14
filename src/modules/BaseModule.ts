@@ -7,7 +7,5 @@ export default abstract class BaseModule {
     this.name = name;
   }
 
-  public download(...args: any[]) {}
-
-  public extract(...args: any[]) {}
+  public async process(...args: any[]) {}
 }

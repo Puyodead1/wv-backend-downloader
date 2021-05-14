@@ -114,6 +114,7 @@ export default class Utils {
             (dl.meta.threads ? dl.meta.threads.length : 0) +
             " threads."
         );
+        console.debug(`Download url: ${url}`);
       });
 
       dl.on("error", () => {

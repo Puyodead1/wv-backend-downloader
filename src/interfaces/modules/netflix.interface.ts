@@ -11,6 +11,18 @@ interface NetflixSkipMarker {
   end: number;
 }
 
+interface NetflixCinematch {
+  value: number;
+  type: string;
+}
+
+interface NetflixUserRating {
+  type: string;
+  matchScore: number;
+  userRating: number;
+  tooNewForMatchScore: boolean;
+}
+
 interface NetflixEpisode {
   autoplayable: boolean;
   bookmark: { offset: number; watchedDate: number };
@@ -50,43 +62,6 @@ interface NetflixSeason {
   year: number;
 }
 
-interface NetflixMetadata {
-  version: string;
-  video: {
-    artwork: NetflixArt[];
-    boxart: NetflixArt[];
-    cinematch: { value: number; type: string };
-    currentEpisode: number;
-    hiddenEpisodeNumbers: boolean;
-    id: number;
-    merchedVideoId: unknown;
-    rating: string;
-    requiresAdultVerification: boolean;
-    requiresPin: boolean;
-    requiresPreReleasePin: boolean;
-    seasons: NetflixSeason[];
-    skipMarkers: {
-      content: NetflixSkipMarker[];
-      credit: NetflixSkipMarker[];
-      recap: NetflixSkipMarker[];
-    };
-    storyart: NetflixArt[];
-    synopsis: string;
-    title: string;
-    type: NetflixType;
-    userRating: {
-      matchScore: unknown;
-      tooNewForMatchScore: boolean;
-      type: "thumb"; // FIXME: this is probably a few different possible types
-      userRating: 2;
-    };
-  };
-  trackIds: {
-    episodeSelector: number;
-    nextEpisode: number;
-  };
-}
-
 interface NetflixAudioTextShortcut {
   id: string;
   audioTrackId: string;
@@ -98,6 +73,55 @@ interface NetflixStreamUrl {
   url: string;
 }
 
+interface NetflixBox {
+  size: number;
+  offset: number;
+}
+
+interface NetflixMetadata {
+  version: string;
+  video: {
+    type: string;
+    id: number;
+    merchedVideoId: unknown;
+    title: string;
+    synopsis: string;
+    rating: string;
+    cinematch: NetflixCinematch;
+    userRating: NetflixUserRating;
+    hiddenEpisodeNumbers: boolean;
+    requiresPin: boolean;
+    requiredPreReleasePin: boolean;
+    requiresAdultVerification: boolean;
+    artwork: NetflixArt[];
+    storyart: NetflixArt[];
+    boxart: NetflixArt[];
+    skipMarkers: NetflixSkipMarker;
+
+    // episode only
+    currentEpisode?: number;
+    seasons?: NetflixSeason[];
+
+    // movie only
+    year?: number;
+    runtime?: number;
+    displayRuntime?: number;
+    creditsOffset?: number;
+    autoplayable?: boolean;
+    start?: number;
+    end?: number;
+    hd?: boolean;
+    bookmark?: {
+      offset: number;
+      watchedDate: number;
+    };
+  };
+  trackIds: {
+    nextEpisode: number;
+    episodeSelector: number;
+  };
+}
+
 interface NetflixAudioStream {
   audioKey: unknown;
   bitrate: number;
@@ -107,16 +131,49 @@ interface NetflixAudioStream {
   downloadable_id: string;
   isDrm: boolean;
   language: string;
-  moov: { size: number; offset: number };
+  moov: NetflixBox;
   new_stream_id: string;
   sidx: { size: number; offset: number };
   size: number;
-  ssix: { size: number; offset: number };
+  ssix: NetflixBox;
   surroundFormatLabel: string;
   tags: unknown[];
   trackType: string;
   type: number;
   urls: NetflixStreamUrl[];
+}
+
+interface NetflixVideoStream {
+  trackType: string;
+  content_profile: string;
+  bitrate: number;
+  peakBitrate: number;
+  dimensionsCount: number;
+  dimensionsLabel: string;
+  drmHeaderId: string;
+  pix_w: number;
+  pix_h: number;
+  res_w: number;
+  res_h: number;
+  framerate_value: number;
+  framerate_scale: number;
+  size: number;
+  startByteOffset: number;
+  isDrm: boolean;
+  vmaf: number;
+  segmentVmaf: unknown;
+  crop_x: number;
+  crop_y: number;
+  crop_w: number;
+  crop_h: number;
+  downloadable_id: string;
+  tags: string[];
+  new_stream_id: string;
+  type: number;
+  urls: NetflixStreamUrl[];
+  moov: NetflixBox;
+  sidx: NetflixBox;
+  ssix: NetflixBox;
 }
 
 interface NetflixAudioTrack {
@@ -177,46 +234,53 @@ interface NetflixServer {
   type: string;
 }
 
+// interface RawNetflixManifest {
+//   audioTextShortcuts: NetflixAudioTextShortcut[];
+//   audio_tracks: NetflixAudioTrack[];
+//   bookmark: number;
+//   cdnResponseData: {
+//     pbcid: string;
+//   };
+//   clientIpAddress: number;
+//   defaultTrackOrderList: NetflixTrackOrderTrack[];
+//   dpsid: unknown;
+//   drmContextId: string;
+//   drmVersion: number;
+//   duration: number;
+//   eligibleABTestMap: {};
+//   expiration: number;
+//   hasClearProfile: boolean;
+//   hasClearStreams: boolean;
+//   hasDrmProfile: boolean;
+//   hasDrmStreams: boolean;
+//   isBranching: boolean;
+//   isSupplemental: boolean;
+//   links: {
+//     events: NetflixLink;
+//     ldl: NetflixLink;
+//     license: NetflixLink;
+//   };
+//   locations: NetflixLocation[];
+//   manifestExpirationDuration: number;
+//   media: {
+//     id: string;
+//     tracks: { AUDIO: string; TEXT: string; VIDEO: string };
+//   }[];
+//   movieId: number;
+//   packageId: string;
+//   playbackContextId: string;
+//   servers: NetflixServer[];
+// }
+
 interface NetflixManifest {
-  audioTextShortcuts: NetflixAudioTextShortcut[];
-  audio_tracks: NetflixAudioTrack[];
-  bookmark: number;
-  cdnResponseData: {
-    pbcid: string;
-  };
-  clientIpAddress: number;
-  defaultTrackOrderList: NetflixTrackOrderTrack[];
-  dpsid: unknown;
-  drmContextId: string;
-  drmVersion: number;
-  duration: number;
-  eligibleABTestMap: {};
-  expiration: number;
-  hasClearProfile: boolean;
-  hasClearStreams: boolean;
-  hasDrmProfile: boolean;
-  hasDrmStreams: boolean;
-  isBranching: boolean;
-  isSupplemental: boolean;
-  links: {
-    events: NetflixLink;
-    ldl: NetflixLink;
-    license: NetflixLink;
-  };
-  locations: NetflixLocation[];
-  manifestExpirationDuration: number;
-  media: {
-    id: string;
-    tracks: { AUDIO: string; TEXT: string; VIDEO: string };
-  }[];
-  movieId: number;
-  packageId: string;
-  playbackContextId: string;
-  servers: NetflixServer[];
+  audioStream: NetflixAudioStream;
+  videoStream: NetflixVideoStream;
 }
 
 interface NetflixPayload {
   metadata: NetflixMetadata;
   manifest: NetflixManifest;
   keys: ContentKeyPair[];
+  kid: string;
+  outputFileName: string;
 }

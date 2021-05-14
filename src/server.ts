@@ -2,6 +2,8 @@ import express from "express";
 import expressWinston from "express-winston";
 import { body, validationResult } from "express-validator";
 import DownloaderAPI from "./DownloaderAPI";
+import BaseModule from "./modules/BaseModule";
+import cors from "cors";
 
 export default class Server {
   public api: DownloaderAPI;
@@ -15,8 +17,14 @@ export default class Server {
   }
 
   initalize() {
-    // use bodyparser
-    this.app.use(express.json());
+    // use cors
+    this.app.use(
+      cors({
+        allowedHeaders: "*",
+      })
+    );
+    // use express bodyparser
+    this.app.use(express.json({ limit: "100mb" }));
 
     // create logger for express http requests
     this.app.use(
@@ -32,7 +40,7 @@ export default class Server {
       "/rip",
       body("platform").isString(),
       body("keys").isArray(),
-      (req, res) => {
+      async (req, res) => {
         // check for errors
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
@@ -42,16 +50,20 @@ export default class Server {
         }
 
         // destructure some variables
-        const { platform } = req.body;
+        const platform: string = req.body.platform;
 
         // check if the platform is supported
         if (!this.api.modules.has(platform.toLowerCase())) {
           return res.status(400).json({ error: "Invalid Platform" });
         }
 
-        // FIXME:
-        // for now, just echo back the request
-        return res.json(req.body);
+        const module: BaseModule = this.api.modules.get(
+          platform.toLowerCase()
+        )!;
+
+        res.sendStatus(204);
+
+        await module.process(req.body);
       }
     );
 
