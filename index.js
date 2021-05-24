@@ -5,12 +5,13 @@ const sanitize = require("./sanitize");
 const sanitize2 = require("sanitize-filename");
 // const progress = require("request-progress");
 const parseXML = require("xml2js").parseStringPromise;
-const fetch = require("node-fetch");
+const fetch = require("node-fetch").default;
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const notifier = require("node-notifier");
 const { default: PQueue } = require("p-queue");
+const m3u8parser = require("m3u8-parser");
 const {
   sortFormats,
   sortAdaptationSets,
@@ -73,6 +74,31 @@ function printProgress(progress) {
   process.stdout.clearLine();
   process.stdout.cursorTo(0);
   process.stdout.write(progress);
+}
+
+function fetchPlaylist(url) {
+  return new Promise((resolve, reject) => {
+    fetch(url)
+      .then(async (res) => {
+        if (res.ok) {
+          resolve(await res.text());
+        } else {
+          reject(res.statusText);
+        }
+      })
+      .catch(reject);
+  });
+}
+
+function parsePlaylist(text) {
+  const parser = new m3u8parser.Parser();
+  parser.push(text);
+  parser.end();
+  return parser;
+}
+
+function downloadSegments(segments) {
+  return new Promise((resolve, reject) => {});
 }
 
 const downloadNew = (url, dir, file) => {
@@ -363,9 +389,8 @@ async function processNetflix(parsed) {
   const manifest = parsed.manifest;
   const audioStream = manifest.audioStream;
   const videoStream = manifest.videoStream;
-  const decryptedContentKeys = manifest.keys;
-  console.log("Manifest:", manifest);
-  console.log("Metadata:", metadata);
+  const subtitleUrl = manifest.subtitleUrl;
+  const decryptedContentKeys = parsed.keys;
 
   const title = sanitize(metadata.video.title);
   const type = metadata.video.type;
@@ -373,11 +398,14 @@ async function processNetflix(parsed) {
   const audioId = audioStream.downloadable_id;
   const videoId = videoStream.downloadable_id;
 
-  const audioUrl = audioStream.urls[1].url;
-  const videoUrl = videoStream.urls[1].url;
+  // 0 should be the fastest
+  const audioUrl = audioStream.urls[0].url;
+  const videoUrl = videoStream.urls[0].url;
 
   const audioFileName = `${audioId}_audio`;
   const videoFileName = `${videoId}_video`;
+  const subtitleFileName = `${videoId}_subtitles.xml`;
+  const convertedSubtitleFileName = `${subtitleFileName}.srt`;
 
   const episodeSeason =
     type === "show"
@@ -407,9 +435,9 @@ async function processNetflix(parsed) {
           "output",
           title,
           seasonShortname,
-          sanitize(manifest.outFileName)
+          sanitize(parsed.outputFileName)
         )
-      : join(__dirname, "output", sanitize(manifest.outFileName));
+      : join(__dirname, "output", sanitize(parsed.outputFileName));
   const finalOutputFolderPath =
     type === "show"
       ? join(__dirname, "output", title, seasonShortname)
@@ -422,6 +450,10 @@ async function processNetflix(parsed) {
 
   const audioFilePath = join(tmpOutputFolderPath, audioFileName);
   const videoFilePath = join(tmpOutputFolderPath, videoFileName);
+  const convertedSubtitleFilePath = join(
+    tmpOutputFolderPath,
+    convertedSubtitleFileName
+  );
 
   const decryptedVideoFilePath = join(tmpOutputFolderPath, "video.decrypted");
 
@@ -441,6 +473,28 @@ async function processNetflix(parsed) {
   console.debug(`Final output path: ${finalOutputPath}`);
   console.debug(`Temp output folder path: ${tmpOutputFolderPath}`);
 
+  if (subtitleUrl) {
+    await downloadNew(subtitleUrl, tmpOutputFolderPath, subtitleFileName).catch(
+      (e) => console.error(e)
+    );
+    console.log("Subtitle Download Complete, converting to srt...");
+
+    const pythonchild = exec(
+      `python to_srt.py -i "${tmpOutputFolderPath}" -o "${tmpOutputFolderPath}"`
+    );
+    pythonchild.on("error", (err) => {
+      console.error(err);
+    });
+    pythonchild.on("message", (msg, _) => {
+      console.log(msg);
+    });
+    pythonchild.on("exit", (code) => {
+      if (code !== 0) {
+        console.error(`to_srt exited with code ${code}`);
+      }
+    });
+  }
+
   await downloadNew(audioUrl, tmpOutputFolderPath, audioFileName).catch((e) =>
     console.error(e)
   );
@@ -451,8 +505,8 @@ async function processNetflix(parsed) {
   );
   console.log("Video download complete");
 
-  console.debug("KID of video file is " + manifest.kid);
-  const kidMatch = decryptedContentKeys.find((x) => x.kid === manifest.kid);
+  console.debug("KID of video file is " + parsed.kid);
+  const kidMatch = decryptedContentKeys.find((x) => x.kid === parsed.kid);
   if (!kidMatch)
     return console.error(
       "No KID Match. Manual intervention may be needed!\n" +
@@ -479,8 +533,6 @@ async function processNetflix(parsed) {
   //   results
   // );
 
-  console.debug(JSON.stringify(decryptedContentKeys));
-
   // now we can attempt to decrypt the video file :D
   const child = exec(
     `mp4decrypt --key 2:${key} "${videoFilePath}" "${decryptedVideoFilePath}"`
@@ -505,8 +557,22 @@ async function processNetflix(parsed) {
       decryptedVideoFilePath,
       "-i",
       audioFilePath,
-      "-c",
+      "-f",
+      "srt",
+      "-i",
+      convertedSubtitleFilePath,
+      "-map",
+      "0:0",
+      "-map",
+      "1:0",
+      "-map",
+      "2:0",
+      "-c:v",
       "copy",
+      "-c:a",
+      "copy",
+      "-c:s",
+      "mov_text",
       finalOutputPath,
     ]);
     console.log(child2.spawnargs.join(" "));
@@ -524,16 +590,19 @@ async function processNetflix(parsed) {
         process.exit(code);
       }
 
-      console.log(`${manifest.outFileName} has been successfully downloaded!`);
-      // fs.unlink(join(__dirname, "tmp", audioFileName), () =>
-      //   console.log("Audio temp file deleted")
-      // );
-      // fs.unlink(join(__dirname, "tmp", videoFileName), () =>
-      //   console.log("Video temp file deleted")
-      // );
-      // fs.unlink(decryptedVideoFilePath, () =>
-      //   console.log("decrypted video temp file deleted")
-      // );
+      console.log(`${parsed.outputFileName} has been successfully downloaded!`);
+      fs.unlink(join(__dirname, "tmp", audioFileName), () =>
+        console.log("Audio temp file deleted")
+      );
+      fs.unlink(join(__dirname, "tmp", videoFileName), () =>
+        console.log("Video temp file deleted")
+      );
+      fs.unlink(decryptedVideoFilePath, () =>
+        console.log("Decrypted video temp file deleted")
+      );
+      fs.unlink(convertedSubtitleFilePath, () =>
+        console.log("Converted subtitle file deleted")
+      );
 
       const notificationMsg =
         type === "show"
@@ -556,13 +625,13 @@ async function processAmazon(parsed) {
   const keys = parsed.keys;
   const asin = parsed.asin;
 
-  const dataUrl = `https://atv-ps.amazon.com/cdp/catalog/GetPlaybackResources?deviceID=232fd6a8bec4c540fb035cdf83b90af96b3a899c899b6654932f8f7d&deviceTypeID=AOAGZA014O5RE&gascEnabled=false&marketplaceID=ATVPDKIKX0DER&uxLocale=en_US&firmware=1&clientId=f22dbddb-ef2c-48c5-8876-bed0d47594fd&deviceApplicationName=Chrome&playerType=xp&operatingSystemName=Windows&operatingSystemVersion=10.0&asin=${asin}&consumptionType=Streaming&desiredResources=PlaybackUrls,CatalogMetadata,SubtitleUrls,ForcedNarratives&resourceUsage=CacheResources&videoMaterialType=Feature&userWatchSessionId=7fa43766-c4aa-441a-ac9c-fe9f125f3266&deviceProtocolOverride=Https&deviceStreamingTechnologyOverride=DASH&deviceDrmOverride=CENC&deviceBitrateAdaptationsOverride=CVBR,CBR&deviceHdrFormatsOverride=None&deviceVideoCodecOverride=H264&deviceVideoQualityOverride=HD&audioTrackId=all&languageFeature=MLFv2&liveManifestType=patternTemplate,accumulating,live&supportedDRMKeyScheme=DUAL_KEY&titleDecorationScheme=primary-content&subtitleFormat=TTMLv2&playbackSettingsFormatVersion=1.0.0&playerAttributes={"middlewareName":"Chrome","middlewareVersion":"86.0.4240.75","nativeApplicationName":"Chrome","nativeApplicationVersion":"86.0.4240.75","supportedAudioCodecs":"AAC","frameRate":"HFR","H264.codecLevel":"4.2","H265.codecLevel":"0.0"}`;
+  const dataUrl = `https://atv-ps.amazon.com/cdp/catalog/GetPlaybackResources?deviceID=232fd6a8bec4c540fb035cdf83b90af96b3a899c899b6654932f8f7d&deviceTypeID=AOAGZA014O5RE&gascEnabled=false&marketplaceID=ATVPDKIKX0DER&uxLocale=en_US&firmware=1&clientId=f22dbddb-ef2c-48c5-8876-bed0d47594fd&deviceApplicationName=Chrome&playerType=xp&operatingSystemName=Windows&operatingSystemVersion=10.0&asin=${asin}&consumptionType=Streaming&desiredResources=PlaybackUrls,CatalogMetadata,SubtitleUrls&resourceUsage=CacheResources&videoMaterialType=Feature&userWatchSessionId=b3fe99dc-116c-4c8c-8d2b-23c4ae33ffd4deviceProtocolOverride=Https&deviceStreamingTechnologyOverride=DASH&deviceDrmOverride=CENC&deviceBitrateAdaptationsOverride=CVBR,CBR&deviceHdrFormatsOverride=None&deviceVideoCodecOverride=H264&deviceVideoQualityOverride=HD&audioTrackId=all&languageFeature=MLFv2&liveManifestType=patternTemplate,accumulating,live&supportedDRMKeyScheme=DUAL_KEY&titleDecorationScheme=primary-content&subtitleFormat=TTMLv2&playbackSettingsFormatVersion=1.0.0&playerAttributes={"middlewareName":"Chrome","middlewareVersion":"86.0.4240.75","nativeApplicationName":"Chrome","nativeApplicationVersion":"86.0.4240.75","supportedAudioCodecs":"AAC","frameRate":"HFR","H264.codecLevel":"4.2","H265.codecLevel":"0.0"}`;
   console.log(dataUrl);
   try {
     const data = await fetch(dataUrl, {
       headers: {
         cookie:
-          'session-id=141-9351593-3439861; ubid-main=133-0720260-1437213; x-main="ZPTqXEUrEesWUS2y7z?v?j9@XdfETsmST6Z8nY1aBr@nva5xAki6JYmgR?PyNHnC"; at-main=Atza|IwEBIGs-CpHo5suFdryTzdpkpDT58G2RyKODkTSum2akclsAtZE222GMYDWwrBjGpLvd2_Gfh_KJtvVtUNAhFsKC5oTVKlZypjLmmPdx3QVXbRuaaZqVB-7K5q6lFzEtHKNhB_Ju9cLoShKDzsMTnYK3tfNYcgx9WU2fag9aV2BEIb1d47gJVqRxSLCUHBQyg4uujG1wyZb2klhTSumj8G5NWmpgBGf6THOfFfToddP4Eolw2w; sess-at-main="eER7OrhaaObSnZo2PljZXmgsiFl3DxnqrZlz34dZ2dk="; sst-main=Sst1|PQErjbnZeO5VY_568Efi38RdCTeB9sVHWS3-TrN_RtjhgpvjOV58hj9sVn9xYTmSxqt-4-SRn54f4fCim2OKdx8Qu4iF_bQFGL8PKRixLQokMUpBQZ5iW4D8PeTZO_536Ql4Rhs7TlX7dlGLUFqLf6qdSz0u03iuSP63llZJvYWWySJEISaUw__ArUr_rWwq9oyVE_cWqcSAQsMjRg3LtJlC-RTDsl_dxOrtGzwjkRalpoBIOz4Dwtj76tJg7e-cfTbw_llopJ5uZvj-1r62qY6GR4kJl2r2lGOfKja6Lge1pyc; lc-main=en_US; i18n-prefs=USD; session-token="wog3OjXPIOG5asvhzsNYJAwUBW4Pis9mLWSIWdjdt/0UgPTQ0Is9rnkd53g0De3DpSnXWHYzQcs6mZxVm0plimDwaU6z/1wZgP0SsadOvauE+nA+gmImWPlrgSbbphDeM6ZTcbCldZRabEZjfZrfO5i+Ob+6u6NmSYgRMkyA8mlgVU/qTyzP17z6IDGY4q2h+PvmnxD+pnYkzC0wWDN3ng=="; scrly_token=NzAxMTFiYzU6emljcmlsMDcyMWFAbWlzY2hvb2xzLm9yZzpzZWN1cmx5QGpjaXNkLm9yZzpqY2lzZG9yZ0hvc3RlZFJlZ2lvbjJEVklTdHVVbnJlc3RyaWN0ZWREVklTdHVIUzEyOi06b3U6Mzg6MDo6; scrly_log_1=1; session-id-time=2082758401l',
+          'session-id=141-9351593-3439861; ubid-main=133-0720260-1437213; skin=noskin; session-token=gPHtHGTGtVTRHIO7LHl8kUUYm0J7Pq44mzOpMmS9tjNKFsaQ41ceBqzz0QuGRB8pTaDTORwR9wq6K5JNSz3iM+9SxJZ2hTR4zL702kqxGs/xWw3oEKZ9Wh+Ef6NSFFABX6TRc+uUbgP+EK261oMEhIXhl1s6zlAvZaSp2ygbSquzMxPDm7u0hs4J2jdZwXNGnhE2ecyt191cvI8nHfaKu24Gesredwrk0qw9nz9Qv8R+r1hy7HrGybWNaZkWDb/AjYTXJh49+1SS6wPJjI6eDdqFF7+oIW4h; x-main="R4rS264qZvFn27nbk7PtQ41KfCx@0pvf"; at-main=Atza|IwEBIBPyhpRiueOt2nG-7S_-XnUlqv8dgI4IKN1PNweFapCZeSzSrUMpxc-_a5jX4l_QEKssQdIzL1kQeE85GiBovt5PpIY2L27Ydn7u25V5Qay_Z49NIQL4E3UNuwQ2VK1mG1Tq65vQYfC8zf5R3rgOHOKI4_EtB65p3yarFzX0DUBMhCl4CIizwHBh3LSZdlj44aRv5iiIq_8kd3UmLHaqADko; sess-at-main="8g7N5MedWfvMnkN4E/NxXDhPdwpInyAxl5l0MCj0hIM="; sst-main=Sst1|PQFRFRiktbN9x3dXZIuQIIVXCR50sUdEOhaauve0GE8CGl2GzkE7BZZ7G6UugAUXt0eHLV-dNIdiO5G4D4b-QyY5itRbcD-xgxCh2L8s3pcri_hXEkw1sNl7JQzFznDST9j8Aas9-6RWphjAjkFy-hQEuyW1tmw6ov3vGATMfWIgiUVjj50ynaD4O_N1QapFam3_7MPJZWVEwSgvYf3mI7kgwFvECsvhgTjYbw9BzzAT5JS3IZzxIOgg6_WT_Gfv-MhrJlq-QGOuMeoY6DIPjT6sR-YJpCbqeLVkd7DuPV3XxHw; lc-main=en_US; session-id-time=2082787201l; i18n-prefs=USD',
       },
     }).then((r) => r.json());
     console.log(data);
@@ -608,9 +677,8 @@ async function processAmazon(parsed) {
         );
 
         // sorts all video representations and finds the best one
-        const bestVideoRepresentation = period.AdaptationSet[0].Representation.sort(
-          sortFormats
-        ).shift();
+        const bestVideoRepresentation =
+          period.AdaptationSet[0].Representation.sort(sortFormats).shift();
 
         // all audio adaptation sets in english
         const audioAdaptationSets = period.AdaptationSet.filter(
@@ -638,9 +706,10 @@ async function processAmazon(parsed) {
         //   );
         //   process.exit(1);
         // }
-        const bestAudioRepresentation = bestAudioAdaptationSet.Representation.sort(
-          sortAudioRepresentationsSets
-        ).shift();
+        const bestAudioRepresentation =
+          bestAudioAdaptationSet.Representation.sort(
+            sortAudioRepresentationsSets
+          ).shift();
 
         if (!bestAudioRepresentation) {
           console.error("No audio representations found!");
@@ -736,11 +805,9 @@ async function processAmazon(parsed) {
         if (!videoKey) return console.error("Video Key was undefined!");
         console.debug("video decryption key is " + videoKey);
 
-        await downloadNew(
-          audioUrl,
-          tmpOutputFolderPath,
-          audioFileName
-        ).catch((e) => console.error(e));
+        await downloadNew(audioUrl, tmpOutputFolderPath, audioFileName).catch(
+          (e) => console.error(e)
+        );
         console.log("Audio download complete, starting decryption...");
 
         const child = exec(
@@ -764,11 +831,9 @@ async function processAmazon(parsed) {
           console.log(`Audio decryption complete`);
         });
 
-        await downloadNew(
-          videoUrl,
-          tmpOutputFolderPath,
-          videoFileName
-        ).catch((e) => console.error(e));
+        await downloadNew(videoUrl, tmpOutputFolderPath, videoFileName).catch(
+          (e) => console.error(e)
+        );
         console.log("Video download complete, starting decryption...");
 
         // download subtitles
@@ -849,3 +914,5 @@ async function processAmazon(parsed) {
     console.error(e);
   }
 }
+
+async function processTubi(parsed) {}

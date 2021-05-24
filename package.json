@@ -14,6 +14,7 @@
     "cors": "^2.8.5",
     "download-file-with-progressbar": "^1.2.3",
     "express": "^4.17.1",
+    "m3u8-parser": "^4.6.0",
     "node-fetch": "^2.6.1",
     "node-notifier": "^9.0.0",
     "nodemon": "^2.0.7",
