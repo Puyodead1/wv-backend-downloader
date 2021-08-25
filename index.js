@@ -392,7 +392,9 @@ async function processNetflix(parsed) {
   const subtitleUrl = manifest.subtitleUrl;
   const decryptedContentKeys = parsed.keys;
 
-  const title = sanitize(metadata.video.title);
+  var title = sanitize(metadata.video.title);
+  // try and remove trailing dots in path names since windows throws a fit
+  if (title.endsWith(".")) title = title.substring(0, title.length - 1);
   const type = metadata.video.type;
 
   const audioId = audioStream.downloadable_id;
@@ -435,7 +437,8 @@ async function processNetflix(parsed) {
           "output",
           title,
           seasonShortname,
-          sanitize(parsed.outputFileName)
+          // try and remove double dots resulting from titles with dot abbriviations
+          sanitize(parsed.outputFileName.replace("..", "."))
         )
       : join(__dirname, "output", sanitize(parsed.outputFileName));
   const finalOutputFolderPath =
@@ -498,6 +501,7 @@ async function processNetflix(parsed) {
   await downloadNew(audioUrl, tmpOutputFolderPath, audioFileName).catch((e) =>
     console.error(e)
   );
+
   console.log("Audio download complete");
 
   await downloadNew(videoUrl, tmpOutputFolderPath, videoFileName).catch((e) =>
@@ -535,7 +539,7 @@ async function processNetflix(parsed) {
 
   // now we can attempt to decrypt the video file :D
   const child = exec(
-    `mp4decrypt --key 2:${key} "${videoFilePath}" "${decryptedVideoFilePath}"`
+    `mp4decrypt --key 1:${key} "${videoFilePath}" "${decryptedVideoFilePath}"`
   );
   child.on("error", (err) => {
     console.error(err);
